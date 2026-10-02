@@ -10,6 +10,7 @@ class Settings(BaseSettings):
         extra="ignore",
     )
 
+    DATABASE_URL: str = ""
     NEO4J_URI: str = ""
     NEO4J_USERNAME: str = ""
     NEO4J_PASSWORD: str = ""
