@@ -2,7 +2,8 @@ from fastapi import APIRouter, HTTPException, status
 from psycopg.errors import UniqueViolation
 
 from app.auth.password import hash_password
-from app.auth.schemas import SignupRequest, SignupResponse
+from app.auth.schemas import LoginRequest, SignupRequest, SignupResponse, TokenResponse
+from app.auth.service import AuthServiceUnavailable, authenticate_user, create_access_token
 from app.db.postgres import get_connection
 
 
@@ -10,6 +11,25 @@ router = APIRouter(
     prefix="/auth",
     tags=["Authentication"],
 )
+
+
+@router.post("/login", response_model=TokenResponse)
+def login(request: LoginRequest) -> TokenResponse:
+    try:
+        user_id = authenticate_user(request.email, request.password)
+        if user_id is None:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Invalid email or password",
+            )
+        access_token = create_access_token(user_id)
+    except AuthServiceUnavailable:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Authentication service unavailable",
+        ) from None
+
+    return TokenResponse(access_token=access_token)
 
 
 @router.post(

@@ -1,5 +1,7 @@
 from datetime import datetime
 import re
+from typing import Literal
+
 from pydantic import BaseModel, Field, field_validator
 
 
@@ -56,3 +58,21 @@ class UserResponse(BaseModel):
 class SignupResponse(BaseModel):
     message: str
     user: UserResponse
+
+
+class LoginRequest(BaseModel):
+    email: str = Field(..., max_length=255)
+    password: str = Field(..., min_length=1, max_length=128)
+
+    @field_validator("email")
+    @classmethod
+    def validate_email(cls, v: str) -> str:
+        v = v.strip().lower()
+        if not EMAIL_REGEX.match(v):
+            raise ValueError("Invalid email format.")
+        return v
+
+
+class TokenResponse(BaseModel):
+    access_token: str
+    token_type: Literal["bearer"] = "bearer"
