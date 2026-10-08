@@ -45,49 +45,65 @@ export default function RegisterPage() {
     token: '',
   });
 
-  // Initialize Google Sign-In SDK if Client ID is configured
+  // Initialize Google Sign-In SDK and render official Google button
   useEffect(() => {
     const clientId = import.meta.env.VITE_GOOGLE_CLIENT_ID;
     if (!clientId) return;
 
-    const script = document.createElement('script');
-    script.src = 'https://accounts.google.com/gsi/client';
-    script.async = true;
-    script.defer = true;
-    script.onload = () => {
-      if (window.google?.accounts?.id) {
-        window.google.accounts.id.initialize({
-          client_id: clientId,
-          callback: async (response: { credential?: string }) => {
-            if (!response.credential) return;
-            setGoogleLoading(true);
-            try {
-              const res = await googleLogin(response.credential);
-              if (res.require_otp) {
-                setOtpModal({
-                  isOpen: true,
-                  email: res.email,
-                  token: res.otp_session_token,
-                });
-              }
-            } catch (err) {
-              if (err instanceof ApiError) {
-                setGeneralError(err.message);
-              } else {
-                setGeneralError('Đăng ký với Google thất bại. Vui lòng thử lại.');
-              }
-            } finally {
-              setGoogleLoading(false);
+    const setupGoogle = () => {
+      if (!window.google?.accounts?.id) return false;
+
+      window.google.accounts.id.initialize({
+        client_id: clientId,
+        callback: async (response: { credential?: string }) => {
+          if (!response.credential) return;
+          setGoogleLoading(true);
+          try {
+            const res = await googleLogin(response.credential);
+            if (res.require_otp) {
+              setOtpModal({
+                isOpen: true,
+                email: res.email,
+                token: res.otp_session_token,
+              });
             }
-          },
+          } catch (err) {
+            if (err instanceof ApiError) {
+              setGeneralError(err.message);
+            } else {
+              setGeneralError('Đăng ký với Google thất bại. Vui lòng thử lại.');
+            }
+          } finally {
+            setGoogleLoading(false);
+          }
+        },
+      });
+
+      const btnContainer = document.getElementById('googleRegisterBtn');
+      if (btnContainer) {
+        btnContainer.innerHTML = '';
+        const btnWidth = Math.min(380, Math.max(220, window.innerWidth - 64));
+        window.google.accounts.id.renderButton(btnContainer, {
+          type: 'standard',
+          theme: 'outline',
+          size: 'large',
+          text: 'signup_with',
+          shape: 'rectangular',
+          logo_alignment: 'left',
+          width: btnWidth,
         });
       }
+      return true;
     };
-    document.body.appendChild(script);
 
-    return () => {
-      document.body.removeChild(script);
-    };
+    if (!setupGoogle()) {
+      const interval = setInterval(() => {
+        if (setupGoogle()) {
+          clearInterval(interval);
+        }
+      }, 150);
+      return () => clearInterval(interval);
+    }
   }, [navigate]);
 
   const handleGoogleClick = () => {
@@ -373,9 +389,9 @@ export default function RegisterPage() {
           <div className="h-px flex-1 bg-beige" />
         </div>
 
-        <GoogleButton onClick={handleGoogleClick} disabled={googleLoading}>
-          {googleLoading ? 'Đang kết nối Google...' : 'Đăng ký với Google'}
-        </GoogleButton>
+        <div className="w-full flex justify-center min-h-[44px]">
+          <div id="googleRegisterBtn" className="w-full flex justify-center" />
+        </div>
 
         <p className="mt-6 text-center text-sm text-muted">
           Đã có tài khoản?{' '}
