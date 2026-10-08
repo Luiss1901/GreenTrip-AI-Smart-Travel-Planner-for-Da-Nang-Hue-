@@ -153,3 +153,16 @@ def test_signup_duplicate_email_on_race_condition() -> None:
     assert response.status_code == 409
     data = response.json()
     assert data["detail"] == "Email is already registered."
+
+
+def test_signup_cors_preflight() -> None:
+    headers = {
+        "Origin": "http://localhost:5173",
+        "Access-Control-Request-Method": "POST",
+        "Access-Control-Request-Headers": "content-type",
+    }
+    response = client.options("/auth/signup", headers=headers)
+    assert response.status_code == 200
+    assert response.headers.get("access-control-allow-origin") == "http://localhost:5173"
+    assert "POST" in response.headers.get("access-control-allow-methods", "")
+
