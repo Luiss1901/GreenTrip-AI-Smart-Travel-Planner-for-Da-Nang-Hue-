@@ -1,4 +1,5 @@
 from datetime import datetime, timedelta, timezone
+import secrets
 
 import jwt
 
@@ -134,4 +135,52 @@ def verify_google_token(id_token_str: str) -> dict | None:
             "picture": idinfo.get("picture"),
         }
     except Exception:
-        return None
+        return None
+
+
+def generate_otp_code() -> str:
+    """Generate a random 6-digit numeric OTP code."""
+    return "".join(secrets.choice("0123456789") for _ in range(6))
+
+
+def create_otp_session_token(email: str, user_id: str) -> str:
+    """Create a temporary 10-minute JWT token for verifying 2FA OTP."""
+    settings = get_settings()
+    if not settings.JWT_SECRET_KEY:
+        raise AuthServiceUnavailable("JWT secret key is not configured.")
+
+    expires_at = datetime.now(timezone.utc) + timedelta(minutes=10)
+    payload = {
+        "sub": str(user_id),
+        "email": email.strip().lower(),
+        "scope": "otp_pending",
+        "exp": expires_at,
+    }
+    return jwt.encode(
+        payload,
+        settings.JWT_SECRET_KEY,
+        algorithm=settings.JWT_ALGORITHM,
+    )
+
+
+def verify_otp_session_token(token: str) -> dict | None:
+    """Verify an OTP session token and extract user details if valid."""
+    settings = get_settings()
+    if not settings.JWT_SECRET_KEY:
+        raise AuthServiceUnavailable("JWT secret key is not configured.")
+
+    try:
+        payload = jwt.decode(
+            token,
+            settings.JWT_SECRET_KEY,
+            algorithms=[settings.JWT_ALGORITHM],
+        )
+        if payload.get("scope") != "otp_pending":
+            return None
+        return {
+            "user_id": str(payload.get("sub")),
+            "email": payload.get("email"),
+        }
+    except (jwt.PyJWTError, ValueError, TypeError):
+        return None
+

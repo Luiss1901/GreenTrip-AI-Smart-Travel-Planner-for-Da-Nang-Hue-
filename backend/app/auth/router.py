@@ -69,7 +69,7 @@ def signup(request: SignupRequest) -> dict:
             with connection.cursor() as cursor:
                 cursor.execute(
                     """
-                    SELECT user_id
+                    SELECT user_id, status
                     FROM public.users
                     WHERE email = %s
                     """,
@@ -79,6 +79,58 @@ def signup(request: SignupRequest) -> dict:
                 existing_user = cursor.fetchone()
 
                 if existing_user:
+                    user_id = existing_user[0]
+                    existing_status = existing_user[1] if len(existing_user) > 1 else "ACTIVE"
+                    if existing_status == "INACTIVE":
+                        cursor.execute(
+                            """
+                            UPDATE public.users
+                            SET full_name = %s,
+                                phone = %s,
+                                password_hash = %s,
+                                updated_at = CURRENT_TIMESTAMP
+                            WHERE user_id = %s
+                            RETURNING
+                                user_id,
+                                full_name,
+                                email,
+                                phone,
+                                role,
+                                status,
+                                created_at,
+                                updated_at
+                            """,
+                            (
+                                request.full_name,
+                                request.phone,
+                                password_hash,
+                                user_id,
+                            ),
+                        )
+                        user = cursor.fetchone()
+                        connection.commit()
+
+                        # Re-generate and dispatch verification email
+                        try:
+                            token = create_verification_token(request.email)
+                            send_verification_email(request.email, request.full_name, token)
+                        except AuthServiceUnavailable:
+                            pass
+
+                        return {
+                            "message": "User registered successfully.",
+                            "user": {
+                                "user_id": str(user[0]),
+                                "full_name": user[1],
+                                "email": user[2],
+                                "phone": user[3],
+                                "role": user[4],
+                                "status": user[5],
+                                "created_at": user[6],
+                                "updated_at": user[7],
+                            },
+                        }
+
                     raise HTTPException(
                         status_code=status.HTTP_409_CONFLICT,
                         detail="Email is already registered.",
@@ -199,7 +251,6 @@ def verify_email(request: VerifyEmailRequest) -> VerifyEmailResponse:
                     """
                     UPDATE public.users
                     SET status = 'ACTIVE',
-                        email_confirmed_at = CURRENT_TIMESTAMP,
                         updated_at = CURRENT_TIMESTAMP
                     WHERE user_id = %s
                     """,
@@ -296,7 +347,6 @@ def google_login(request: GoogleLoginRequest) -> TokenResponse:
                             """
                             UPDATE public.users
                             SET status = 'ACTIVE',
-                                email_confirmed_at = CURRENT_TIMESTAMP,
                                 updated_at = CURRENT_TIMESTAMP
                             WHERE user_id = %s
                             """,
@@ -310,10 +360,9 @@ def google_login(request: GoogleLoginRequest) -> TokenResponse:
                             full_name,
                             email,
                             role,
-                            status,
-                            email_confirmed_at
+                            status
                         )
-                        VALUES (%s, %s, 'USER', 'ACTIVE', CURRENT_TIMESTAMP)
+                        VALUES (%s, %s, 'USER', 'ACTIVE')
                         RETURNING user_id
                         """,
                         (full_name, email),
