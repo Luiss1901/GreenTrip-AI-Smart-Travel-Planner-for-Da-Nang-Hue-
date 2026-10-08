@@ -7,6 +7,7 @@ import PasswordInput from '@/components/ui/PasswordInput';
 import Button from '@/components/ui/Button';
 import Checkbox from '@/components/ui/Checkbox';
 import GoogleButton from '@/components/ui/GoogleButton';
+import { VerifyOtpModal } from '@/components/auth/VerifyOtpModal';
 import { login, googleLogin, resendVerification, ApiError } from '@/services/auth';
 
 declare global {
@@ -32,6 +33,16 @@ export default function LoginPage() {
   const [errors, setErrors] = useState<Errors>({});
   const [loading, setLoading] = useState(false);
   const [googleLoading, setGoogleLoading] = useState(false);
+
+  const [otpModal, setOtpModal] = useState<{
+    isOpen: boolean;
+    email: string;
+    token: string;
+  }>({
+    isOpen: false,
+    email: '',
+    token: '',
+  });
 
   const [noticeMessage, setNoticeMessage] = useState<string | null>(
     state?.verifiedEmail
@@ -61,8 +72,13 @@ export default function LoginPage() {
             setGoogleLoading(true);
             try {
               const res = await googleLogin(response.credential);
-              localStorage.setItem('access_token', res.access_token);
-              navigate('/explore');
+              if (res.require_otp) {
+                setOtpModal({
+                  isOpen: true,
+                  email: res.email,
+                  token: res.otp_session_token,
+                });
+              }
             } catch (err) {
               if (err instanceof ApiError) {
                 setGeneralError(err.message);
@@ -291,6 +307,18 @@ export default function LoginPage() {
           </Link>
         </p>
       </form>
+
+      <VerifyOtpModal
+        isOpen={otpModal.isOpen}
+        email={otpModal.email}
+        otpSessionToken={otpModal.token}
+        onSuccess={(token) => {
+          localStorage.setItem('access_token', token);
+          setOtpModal({ isOpen: false, email: '', token: '' });
+          navigate('/explore');
+        }}
+        onClose={() => setOtpModal({ isOpen: false, email: '', token: '' })}
+      />
     </AuthLayout>
   );
 }

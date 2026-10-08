@@ -140,7 +140,30 @@ export async function login(payload: LoginPayload): Promise<TokenResponse> {
   return response.json();
 }
 
-export async function googleLogin(credential: string): Promise<TokenResponse> {
+export interface GoogleLoginResponse {
+  require_otp: boolean;
+  email: string;
+  otp_session_token: string;
+  message: string;
+}
+
+export interface VerifyOtpPayload {
+  email: string;
+  otp_code: string;
+  otp_session_token: string;
+}
+
+export interface ResendOtpPayload {
+  email: string;
+  otp_session_token: string;
+}
+
+export interface ResendOtpResponse {
+  message: string;
+  email: string;
+}
+
+export async function googleLogin(credential: string): Promise<GoogleLoginResponse> {
   const response = await fetch(`${API_BASE_URL}/auth/google`, {
     method: 'POST',
     headers: {
@@ -162,4 +185,51 @@ export async function googleLogin(credential: string): Promise<TokenResponse> {
 
   return response.json();
 }
+
+export async function verifyOtp(payload: VerifyOtpPayload): Promise<TokenResponse> {
+  const response = await fetch(`${API_BASE_URL}/auth/verify-otp`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify(payload),
+  });
+
+  if (!response.ok) {
+    const errorData = await response.json().catch(() => null);
+    let errorMessage = 'Xác thực mã OTP thất bại. Vui lòng thử lại.';
+
+    if (errorData && typeof errorData.detail === 'string') {
+      errorMessage = errorData.detail;
+    }
+
+    throw new ApiError(errorMessage, response.status, typeof errorData?.detail === 'string' ? errorData.detail : undefined);
+  }
+
+  return response.json();
+}
+
+export async function resendOtp(payload: ResendOtpPayload): Promise<ResendOtpResponse> {
+  const response = await fetch(`${API_BASE_URL}/auth/resend-otp`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify(payload),
+  });
+
+  if (!response.ok) {
+    const errorData = await response.json().catch(() => null);
+    let errorMessage = 'Không thể gửi lại mã OTP lúc này.';
+
+    if (errorData && typeof errorData.detail === 'string') {
+      errorMessage = errorData.detail;
+    }
+
+    throw new ApiError(errorMessage, response.status, typeof errorData?.detail === 'string' ? errorData.detail : undefined);
+  }
+
+  return response.json();
+}
+
 
