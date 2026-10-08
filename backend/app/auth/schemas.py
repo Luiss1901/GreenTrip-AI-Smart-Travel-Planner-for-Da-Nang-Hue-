@@ -76,3 +76,76 @@ class LoginRequest(BaseModel):
 class TokenResponse(BaseModel):
     access_token: str
     token_type: Literal["bearer"] = "bearer"
+
+
+class VerifyEmailRequest(BaseModel):
+    token: str = Field(..., min_length=1)
+
+
+class VerifyEmailResponse(BaseModel):
+    message: str
+    email: str
+
+
+class ResendVerificationRequest(BaseModel):
+    email: str = Field(..., max_length=255)
+
+    @field_validator("email")
+    @classmethod
+    def validate_email(cls, v: str) -> str:
+        v = v.strip().lower()
+        if not EMAIL_REGEX.match(v):
+            raise ValueError("Invalid email format.")
+        return v
+
+
+class GoogleLoginRequest(BaseModel):
+    credential: str = Field(..., min_length=1, description="Google OAuth ID Token / Credential")
+
+
+class GoogleLoginResponse(BaseModel):
+    require_otp: bool = True
+    email: str
+    otp_session_token: str
+    message: str = "Mã xác thực OTP đã được gửi tới email của bạn."
+
+
+class VerifyOtpRequest(BaseModel):
+    email: str = Field(..., max_length=255)
+    otp_code: str = Field(..., min_length=6, max_length=6)
+    otp_session_token: str = Field(..., min_length=1)
+
+    @field_validator("email")
+    @classmethod
+    def validate_email(cls, v: str) -> str:
+        v = v.strip().lower()
+        if not EMAIL_REGEX.match(v):
+            raise ValueError("Invalid email format.")
+        return v
+
+    @field_validator("otp_code")
+    @classmethod
+    def validate_otp_code(cls, v: str) -> str:
+        v = v.strip()
+        if not v.isdigit() or len(v) != 6:
+            raise ValueError("Mã OTP phải bao gồm đúng 6 chữ số.")
+        return v
+
+
+class ResendOtpRequest(BaseModel):
+    email: str = Field(..., max_length=255)
+    otp_session_token: str = Field(..., min_length=1)
+
+    @field_validator("email")
+    @classmethod
+    def validate_email(cls, v: str) -> str:
+        v = v.strip().lower()
+        if not EMAIL_REGEX.match(v):
+            raise ValueError("Invalid email format.")
+        return v
+
+
+class ResendOtpResponse(BaseModel):
+    message: str
+    email: str
+
