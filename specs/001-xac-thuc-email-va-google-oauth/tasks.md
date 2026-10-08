@@ -29,12 +29,13 @@
 
 ## Phase 3: User Story 1 - Kích hoạt tài khoản qua Email Link (P1) 🎯 Core MVP
 
-- [ ] **T006** [Test] [US1] Viết automated tests cho luồng xác thực email tại `backend/tests/test_email_verification.py`.
-- [ ] **T007** [US1] Cập nhật endpoint `POST /auth/signup` (tạo user `pending` và gửi mail) và thêm endpoint `POST /auth/verify-email` trong `backend/app/auth/router.py`.
-- [ ] **T008** [P] [US1] Thêm API client `verifyEmail` và `signup` trong `frontend/src/services/auth.ts`.
-- [ ] **T009** [P] [US1] Xây dựng trang `frontend/src/pages/VerifyEmailPage.tsx` và thêm route `/verify-email` trong `frontend/src/App.tsx`.
-- [ ] **T010** [US1] Cập nhật giao diện `frontend/src/pages/RegisterPage.tsx` hiển thị màn hình "Kiểm tra hộp thư" sau khi đăng ký.
-- [ ] **T011** [US1] Chạy `pytest` xác thực 100% test case của US1 vượt qua thành công.
+- [x] **T006** [Test] [US1] Viết automated tests cho luồng xác thực email tại `backend/tests/test_email_verification.py`.
+- [x] **T007** [US1] Cập nhật endpoint `POST /auth/signup` (tạo user `pending` và gửi mail) và thêm endpoint `POST /auth/verify-email` trong `backend/app/auth/router.py`.
+- [x] **T008** [P] [US1] Thêm API client `verifyEmail` và `signup` trong `frontend/src/services/auth.ts`.
+- [x] **T009** [P] [US1] Xây dựng trang `frontend/src/pages/VerifyEmailPage.tsx` và thêm route `/verify-email` trong `frontend/src/App.tsx`.
+- [x] **T010** [US1] Cập nhật giao diện `frontend/src/pages/RegisterPage.tsx` hiển thị màn hình "Kiểm tra hộp thư" sau khi đăng ký.
+- [x] **T011** [US1] Chạy `pytest` xác thực 100% test case của US1 vượt qua thành công.
+
 
 ---
 
