@@ -4,6 +4,7 @@ from psycopg.errors import UniqueViolation
 from app.auth.email import send_verification_email
 from app.auth.password import hash_password
 from app.auth.schemas import (
+    GoogleLoginRequest,
     LoginRequest,
     ResendVerificationRequest,
     SignupRequest,
@@ -13,11 +14,13 @@ from app.auth.schemas import (
     VerifyEmailResponse,
 )
 from app.auth.service import (
+    AccountNotActive,
     AuthServiceUnavailable,
     authenticate_user,
     create_access_token,
     create_verification_token,
     verify_email_token,
+    verify_google_token,
 )
 from app.db.postgres import get_connection
 
@@ -38,6 +41,11 @@ def login(request: LoginRequest) -> TokenResponse:
                 detail="Invalid email or password",
             )
         access_token = create_access_token(user_id)
+    except AccountNotActive:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Tài khoản chưa được kích hoạt. Vui lòng kiểm tra email của bạn để kích hoạt tài khoản.",
+        )
     except AuthServiceUnavailable:
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
@@ -45,6 +53,7 @@ def login(request: LoginRequest) -> TokenResponse:
         ) from None
 
     return TokenResponse(access_token=access_token)
+
 
 
 @router.post(
@@ -253,4 +262,75 @@ def resend_verification(request: ResendVerificationRequest) -> VerifyEmailRespon
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Không thể gửi lại email xác nhận.",
         ) from error
+
+
+@router.post("/google", response_model=TokenResponse)
+def google_login(request: GoogleLoginRequest) -> TokenResponse:
+    google_user = verify_google_token(request.credential)
+    if not google_user:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Google ID token không hợp lệ hoặc đã hết hạn.",
+        )
+
+    email = google_user["email"]
+    full_name = google_user["full_name"]
+
+    try:
+        with get_connection() as connection:
+            with connection.cursor() as cursor:
+                cursor.execute(
+                    """
+                    SELECT user_id, status
+                    FROM public.users
+                    WHERE email = %s
+                    """,
+                    (email,),
+                )
+                user = cursor.fetchone()
+
+                if user:
+                    user_id, current_status = user[0], user[1]
+                    if current_status != "ACTIVE":
+                        cursor.execute(
+                            """
+                            UPDATE public.users
+                            SET status = 'ACTIVE',
+                                email_confirmed_at = CURRENT_TIMESTAMP,
+                                updated_at = CURRENT_TIMESTAMP
+                            WHERE user_id = %s
+                            """,
+                            (user_id,),
+                        )
+                        connection.commit()
+                else:
+                    cursor.execute(
+                        """
+                        INSERT INTO public.users (
+                            full_name,
+                            email,
+                            role,
+                            status,
+                            email_confirmed_at
+                        )
+                        VALUES (%s, %s, 'USER', 'ACTIVE', CURRENT_TIMESTAMP)
+                        RETURNING user_id
+                        """,
+                        (full_name, email),
+                    )
+                    created_user = cursor.fetchone()
+                    connection.commit()
+                    user_id = created_user[0]
+
+        access_token = create_access_token(str(user_id))
+        return TokenResponse(access_token=access_token)
+
+    except HTTPException:
+        raise
+    except Exception as error:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Không thể xử lý đăng nhập Google lúc này.",
+        ) from error
+
 

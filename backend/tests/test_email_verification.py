@@ -162,3 +162,73 @@ def test_verify_email_user_not_found() -> None:
         )
 
     assert response.status_code == 404
+
+
+def test_login_rejects_inactive_account() -> None:
+    from app.auth.password import hash_password
+
+    settings = get_settings()
+    settings.JWT_SECRET_KEY = "test-secret-key-123"
+
+    mock_conn = MagicMock()
+    mock_cursor = MagicMock()
+    mock_conn.cursor.return_value.__enter__.return_value = mock_cursor
+    password_hash = hash_password("ValidPassword123!")
+    # User exists but status is INACTIVE
+    mock_cursor.fetchone.return_value = ("user-uuid-123", password_hash, "INACTIVE")
+
+    with (
+        patch("app.auth.service.get_connection") as mock_get_conn,
+        patch("app.config.get_settings") as mock_get_settings,
+    ):
+        mock_get_settings.return_value = settings
+        mock_get_conn.return_value.__enter__.return_value = mock_conn
+
+        response = client.post(
+            "/auth/login",
+            json={
+                "email": "hasagi1706@gmail.com",
+                "password": "ValidPassword123!",
+            },
+        )
+
+    assert response.status_code == 403
+    assert "chưa được kích hoạt" in response.json()["detail"].lower()
+
+
+def test_google_login_success() -> None:
+    settings = get_settings()
+    settings.JWT_SECRET_KEY = "test-secret-key-123"
+
+    mock_google_profile = {
+        "email": "hasagi1706@gmail.com",
+        "full_name": "Minh Nguyen Google",
+        "google_id": "google-sub-12345",
+        "picture": "https://example.com/photo.jpg",
+    }
+
+    mock_conn = MagicMock()
+    mock_cursor = MagicMock()
+    mock_conn.cursor.return_value.__enter__.return_value = mock_cursor
+    # User does not exist, then inserted
+    mock_cursor.fetchone.side_effect = [None, ("new-user-uuid-999",)]
+
+    with (
+        patch("app.auth.router.verify_google_token") as mock_verify_google,
+        patch("app.auth.router.get_connection") as mock_get_conn,
+        patch("app.config.get_settings") as mock_get_settings,
+    ):
+        mock_verify_google.return_value = mock_google_profile
+        mock_get_settings.return_value = settings
+        mock_get_conn.return_value.__enter__.return_value = mock_conn
+
+        response = client.post(
+            "/auth/google",
+            json={"credential": "mock_google_id_token_string"},
+        )
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["access_token"]
+    assert data["token_type"] == "bearer"
+

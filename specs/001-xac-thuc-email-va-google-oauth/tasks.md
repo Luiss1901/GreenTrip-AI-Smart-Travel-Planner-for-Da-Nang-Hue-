@@ -41,15 +41,16 @@
 
 ## Phase 4: User Story 2 - Đăng nhập an toàn & Kiểm tra kích hoạt (P2)
 
-- [ ] **T012** [US2] Cập nhật hàm `authenticate_user` và endpoint `POST /auth/login` kiểm tra trạng thái `status == 'active'` (báo lỗi 403 nếu `pending`).
-- [ ] **T013** [US2] Cập nhật giao diện `frontend/src/pages/LoginPage.tsx` hiển thị thông báo rõ ràng khi tài khoản chưa kích hoạt.
+- [x] **T012** [US2] Cập nhật hàm `authenticate_user` và endpoint `POST /auth/login` kiểm tra trạng thái `status == 'active'` (báo lỗi 403 nếu `pending`/`INACTIVE`).
+- [x] **T013** [US2] Cập nhật giao diện `frontend/src/pages/LoginPage.tsx` hiển thị thông báo rõ ràng khi tài khoản chưa kích hoạt.
 
 ---
 
 ## Phase 5: User Story 3 - Đăng nhập 1 chạm với Google OAuth (P3)
 
-- [ ] **T014** [US3] Viết hàm `verify_google_token` và endpoint `POST /auth/google` trong backend (tự động tạo user `active` và cấp JWT token).
-- [ ] **T015** [US3] Tích hợp Google Identity Services (GIS) vào `frontend/src/components/ui/GoogleButton.tsx` và `LoginPage.tsx`.
+- [x] **T014** [US3] Viết hàm `verify_google_token` và endpoint `POST /auth/google` trong backend (tự động tạo user `active` và cấp JWT token).
+- [x] **T015** [US3] Tích hợp Google Identity Services (GIS) vào `frontend/src/components/ui/GoogleButton.tsx` và `LoginPage.tsx`.
+
 
 ---
 

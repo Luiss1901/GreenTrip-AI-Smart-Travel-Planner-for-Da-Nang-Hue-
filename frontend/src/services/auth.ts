@@ -139,3 +139,27 @@ export async function login(payload: LoginPayload): Promise<TokenResponse> {
 
   return response.json();
 }
+
+export async function googleLogin(credential: string): Promise<TokenResponse> {
+  const response = await fetch(`${API_BASE_URL}/auth/google`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({ credential }),
+  });
+
+  if (!response.ok) {
+    const errorData = await response.json().catch(() => null);
+    let errorMessage = 'Đăng nhập với Google thất bại. Vui lòng thử lại.';
+
+    if (errorData && typeof errorData.detail === 'string') {
+      errorMessage = errorData.detail;
+    }
+
+    throw new ApiError(errorMessage, response.status, typeof errorData?.detail === 'string' ? errorData.detail : undefined);
+  }
+
+  return response.json();
+}
+

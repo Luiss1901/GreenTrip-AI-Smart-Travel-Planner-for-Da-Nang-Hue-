@@ -11,13 +11,17 @@ class AuthServiceUnavailable(Exception):
     """Raised when the database or JWT configuration is unavailable."""
 
 
+class AccountNotActive(Exception):
+    """Raised when the user exists and password is correct, but account is not active."""
+
+
 def authenticate_user(email: str, password: str) -> str | None:
     try:
         with get_connection() as connection:
             with connection.cursor() as cursor:
                 cursor.execute(
                     """
-                    SELECT user_id, password_hash
+                    SELECT user_id, password_hash, status
                     FROM public.users
                     WHERE email = %s
                     """,
@@ -35,7 +39,15 @@ def authenticate_user(email: str, password: str) -> str | None:
     except Exception:
         return None
 
-    return str(user[0]) if is_valid else None
+    if not is_valid:
+        return None
+
+    status_val = user[2] if len(user) > 2 else "ACTIVE"
+    if (status_val or "").upper() != "ACTIVE":
+        raise AccountNotActive
+
+    return str(user[0])
+
 
 
 def create_access_token(subject: str) -> str:

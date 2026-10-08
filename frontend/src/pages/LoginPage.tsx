@@ -1,12 +1,19 @@
-import { useState, FormEvent } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
-import { Mail, Lock } from 'lucide-react';
+import { useState, useEffect, FormEvent } from 'react';
+import { Link, useNavigate, useLocation } from 'react-router-dom';
+import { Mail, CheckCircle2, AlertTriangle, RefreshCw, Loader2 } from 'lucide-react';
 import AuthLayout from '@/components/layout/AuthLayout';
 import Input from '@/components/ui/Input';
 import PasswordInput from '@/components/ui/PasswordInput';
 import Button from '@/components/ui/Button';
 import Checkbox from '@/components/ui/Checkbox';
 import GoogleButton from '@/components/ui/GoogleButton';
+import { login, googleLogin, resendVerification, ApiError } from '@/services/auth';
+
+declare global {
+  interface Window {
+    google?: any;
+  }
+}
 
 interface Errors {
   email?: string;
@@ -15,11 +22,66 @@ interface Errors {
 
 export default function LoginPage() {
   const navigate = useNavigate();
-  const [email, setEmail] = useState('');
+  const location = useLocation();
+
+  const state = location.state as { registeredEmail?: string; verifiedEmail?: string } | null;
+
+  const [email, setEmail] = useState(state?.registeredEmail || state?.verifiedEmail || '');
   const [password, setPassword] = useState('');
   const [remember, setRemember] = useState(true);
   const [errors, setErrors] = useState<Errors>({});
   const [loading, setLoading] = useState(false);
+  const [googleLoading, setGoogleLoading] = useState(false);
+
+  const [noticeMessage, setNoticeMessage] = useState<string | null>(
+    state?.verifiedEmail
+      ? '🎉 Tài khoản của bạn đã được kích hoạt thành công! Hãy đăng nhập để bắt đầu.'
+      : null
+  );
+  const [generalError, setGeneralError] = useState<string | null>(null);
+  const [isInactive, setIsInactive] = useState(false);
+  const [resending, setResending] = useState(false);
+  const [resendStatus, setResendStatus] = useState<string | null>(null);
+
+  // Initialize Google Sign-In SDK if Client ID is configured
+  useEffect(() => {
+    const clientId = import.meta.env.VITE_GOOGLE_CLIENT_ID;
+    if (!clientId) return;
+
+    const script = document.createElement('script');
+    script.src = 'https://accounts.google.com/gsi/client';
+    script.async = true;
+    script.defer = true;
+    script.onload = () => {
+      if (window.google?.accounts?.id) {
+        window.google.accounts.id.initialize({
+          client_id: clientId,
+          callback: async (response: { credential?: string }) => {
+            if (!response.credential) return;
+            setGoogleLoading(true);
+            try {
+              const res = await googleLogin(response.credential);
+              localStorage.setItem('access_token', res.access_token);
+              navigate('/explore');
+            } catch (err) {
+              if (err instanceof ApiError) {
+                setGeneralError(err.message);
+              } else {
+                setGeneralError('Đăng nhập với Google thất bại. Vui lòng thử lại.');
+              }
+            } finally {
+              setGoogleLoading(false);
+            }
+          },
+        });
+      }
+    };
+    document.body.appendChild(script);
+
+    return () => {
+      document.body.removeChild(script);
+    };
+  }, [navigate]);
 
   const validate = (): boolean => {
     const e: Errors = {};
@@ -30,14 +92,66 @@ export default function LoginPage() {
     return Object.keys(e).length === 0;
   };
 
-  const handleSubmit = (ev: FormEvent) => {
+  const handleSubmit = async (ev: FormEvent) => {
     ev.preventDefault();
+    setGeneralError(null);
+    setIsInactive(false);
+    setResendStatus(null);
     if (!validate()) return;
+
     setLoading(true);
-    setTimeout(() => {
-      setLoading(false);
+    try {
+      const res = await login({ email: email.trim(), password });
+      if (remember) {
+        localStorage.setItem('access_token', res.access_token);
+      } else {
+        sessionStorage.setItem('access_token', res.access_token);
+      }
       navigate('/explore');
-    }, 1200);
+    } catch (err) {
+      if (err instanceof ApiError) {
+        if (err.status === 403) {
+          setIsInactive(true);
+          setGeneralError(err.message);
+        } else {
+          setGeneralError(err.message);
+        }
+      } else {
+        setGeneralError('Không thể kết nối đến máy chủ. Vui lòng thử lại sau.');
+      }
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleResend = async () => {
+    if (!email.trim() || resending) return;
+    setResending(true);
+    setResendStatus(null);
+    try {
+      const res = await resendVerification(email.trim());
+      setResendStatus(res.message || 'Đã gửi lại email kích hoạt!');
+    } catch (err) {
+      if (err instanceof ApiError) {
+        setResendStatus(err.message);
+      } else {
+        setResendStatus('Không thể gửi lại email lúc này.');
+      }
+    } finally {
+      setResending(false);
+    }
+  };
+
+  const handleGoogleClick = () => {
+    const clientId = import.meta.env.VITE_GOOGLE_CLIENT_ID;
+    if (!clientId) {
+      setGeneralError('Hệ thống đang chuẩn bị kết nối Google OAuth. Vui lòng cung cấp VITE_GOOGLE_CLIENT_ID trong file .env để kích hoạt tính năng này.');
+      return;
+    }
+
+    if (window.google?.accounts?.id) {
+      window.google.accounts.id.prompt();
+    }
   };
 
   return (
@@ -53,7 +167,7 @@ export default function LoginPage() {
       ecoStat={{ score: 86, co2: '4,2 kg' }}
     >
       <form onSubmit={handleSubmit} noValidate>
-        <div className="mb-8">
+        <div className="mb-6">
           <h2 className="font-display text-2xl font-semibold text-charcoal">
             Chào mừng trở lại
           </h2>
@@ -61,6 +175,55 @@ export default function LoginPage() {
             Đăng nhập để tiếp tục lên lịch trình cho chuyến đi tiếp theo
           </p>
         </div>
+
+        {noticeMessage && (
+          <div className="mb-4 rounded-xl bg-emerald-50 border border-emerald-200 p-3.5 text-sm text-forest-700 flex items-start gap-2">
+            <CheckCircle2 size={18} className="mt-0.5 shrink-0" />
+            <span>{noticeMessage}</span>
+          </div>
+        )}
+
+        {generalError && (
+          <div className={`mb-4 rounded-xl p-3.5 text-sm border ${
+            isInactive
+              ? 'bg-amber-50 border-amber-200 text-amber-800'
+              : 'bg-red-50 border-red-200 text-red-700'
+          }`}>
+            <div className="flex items-start gap-2">
+              <AlertTriangle size={18} className="mt-0.5 shrink-0" />
+              <div className="flex-1">
+                <p>{generalError}</p>
+                {isInactive && (
+                  <div className="mt-2.5 pt-2 border-t border-amber-200/80">
+                    <button
+                      type="button"
+                      onClick={handleResend}
+                      disabled={resending}
+                      className="inline-flex items-center gap-1.5 text-xs font-semibold text-forest-700 hover:text-forest-800 hover:underline"
+                    >
+                      {resending ? (
+                        <>
+                          <Loader2 size={13} className="animate-spin" />
+                          <span>Đang gửi lại...</span>
+                        </>
+                      ) : (
+                        <>
+                          <RefreshCw size={13} />
+                          <span>Gửi lại email kích hoạt đến {email}</span>
+                        </>
+                      )}
+                    </button>
+                    {resendStatus && (
+                      <p className="mt-1 text-xs text-forest-600 font-medium">
+                        ✓ {resendStatus}
+                      </p>
+                    )}
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
+        )}
 
         <div className="space-y-4">
           <Input
@@ -114,7 +277,9 @@ export default function LoginPage() {
           <div className="h-px flex-1 bg-beige" />
         </div>
 
-        <GoogleButton>Tiếp tục với Google</GoogleButton>
+        <GoogleButton onClick={handleGoogleClick} disabled={googleLoading}>
+          {googleLoading ? 'Đang kết nối Google...' : 'Tiếp tục với Google'}
+        </GoogleButton>
 
         <p className="mt-6 text-center text-sm text-muted">
           Chưa có tài khoản?{' '}
@@ -129,3 +294,4 @@ export default function LoginPage() {
     </AuthLayout>
   );
 }
+
