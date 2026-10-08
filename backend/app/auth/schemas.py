@@ -76,3 +76,29 @@ class LoginRequest(BaseModel):
 class TokenResponse(BaseModel):
     access_token: str
     token_type: Literal["bearer"] = "bearer"
+
+
+class VerifyEmailRequest(BaseModel):
+    token: str = Field(..., min_length=1)
+
+
+class VerifyEmailResponse(BaseModel):
+    message: str
+    email: str
+
+
+class ResendVerificationRequest(BaseModel):
+    email: str = Field(..., max_length=255)
+
+    @field_validator("email")
+    @classmethod
+    def validate_email(cls, v: str) -> str:
+        v = v.strip().lower()
+        if not EMAIL_REGEX.match(v):
+            raise ValueError("Invalid email format.")
+        return v
+
+
+class GoogleLoginRequest(BaseModel):
+    credential: str = Field(..., min_length=1, description="Google OAuth ID Token / Credential")
+
