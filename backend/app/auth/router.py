@@ -1,26 +1,35 @@
+from datetime import datetime, timezone
+
 from fastapi import APIRouter, HTTPException, status
 from psycopg.errors import UniqueViolation
 
-from app.auth.email import send_verification_email
+from app.auth.email import send_otp_email, send_verification_email
 from app.auth.password import hash_password
 from app.auth.schemas import (
     GoogleLoginRequest,
+    GoogleLoginResponse,
     LoginRequest,
+    ResendOtpRequest,
+    ResendOtpResponse,
     ResendVerificationRequest,
     SignupRequest,
     SignupResponse,
     TokenResponse,
     VerifyEmailRequest,
     VerifyEmailResponse,
+    VerifyOtpRequest,
 )
 from app.auth.service import (
     AccountNotActive,
     AuthServiceUnavailable,
     authenticate_user,
     create_access_token,
+    create_otp_session_token,
     create_verification_token,
+    generate_otp_code,
     verify_email_token,
     verify_google_token,
+    verify_otp_session_token,
 )
 from app.db.postgres import get_connection
 
@@ -315,8 +324,8 @@ def resend_verification(request: ResendVerificationRequest) -> VerifyEmailRespon
         ) from error
 
 
-@router.post("/google", response_model=TokenResponse)
-def google_login(request: GoogleLoginRequest) -> TokenResponse:
+@router.post("/google", response_model=GoogleLoginResponse)
+def google_login(request: GoogleLoginRequest) -> GoogleLoginResponse:
     google_user = verify_google_token(request.credential)
     if not google_user:
         raise HTTPException(
@@ -324,7 +333,7 @@ def google_login(request: GoogleLoginRequest) -> TokenResponse:
             detail="Google ID token không hợp lệ hoặc đã hết hạn.",
         )
 
-    email = google_user["email"]
+    email = google_user["email"].strip().lower()
     full_name = google_user["full_name"]
 
     try:
@@ -371,8 +380,35 @@ def google_login(request: GoogleLoginRequest) -> TokenResponse:
                     connection.commit()
                     user_id = created_user[0]
 
-        access_token = create_access_token(str(user_id))
-        return TokenResponse(access_token=access_token)
+                # Generate 6-digit OTP and store in public.email_otps
+                otp_code = generate_otp_code()
+                cursor.execute(
+                    """
+                    INSERT INTO public.email_otps (
+                        email,
+                        otp_code,
+                        purpose,
+                        expires_at
+                    )
+                    VALUES (%s, %s, 'GOOGLE_2FA', CURRENT_TIMESTAMP + INTERVAL '5 minutes')
+                    """,
+                    (email, otp_code),
+                )
+                connection.commit()
+
+        # Dispatch OTP via Gmail SMTP
+        try:
+            send_otp_email(email, full_name, otp_code)
+        except Exception:
+            pass
+
+        otp_session_token = create_otp_session_token(email, str(user_id))
+        return GoogleLoginResponse(
+            require_otp=True,
+            email=email,
+            otp_session_token=otp_session_token,
+            message="Mã xác thực OTP gồm 6 chữ số đã được gửi tới email của bạn.",
+        )
 
     except HTTPException:
         raise
@@ -381,5 +417,172 @@ def google_login(request: GoogleLoginRequest) -> TokenResponse:
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Không thể xử lý đăng nhập Google lúc này.",
         ) from error
+
+
+@router.post("/verify-otp", response_model=TokenResponse)
+def verify_otp(request: VerifyOtpRequest) -> TokenResponse:
+    session = verify_otp_session_token(request.otp_session_token)
+    if not session or session["email"].lower() != request.email.lower():
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Phiên xác thực không hợp lệ hoặc đã hết hạn. Vui lòng đăng nhập lại.",
+        )
+
+    try:
+        with get_connection() as connection:
+            with connection.cursor() as cursor:
+                cursor.execute(
+                    """
+                    SELECT id, otp_code, attempts, expires_at, is_used
+                    FROM public.email_otps
+                    WHERE email = %s AND purpose = 'GOOGLE_2FA' AND is_used = FALSE
+                    ORDER BY created_at DESC
+                    LIMIT 1
+                    """,
+                    (request.email.lower(),),
+                )
+                otp_record = cursor.fetchone()
+                if not otp_record:
+                    raise HTTPException(
+                        status_code=status.HTTP_400_BAD_REQUEST,
+                        detail="Không tìm thấy mã OTP hợp lệ hoặc mã đã được sử dụng. Vui lòng yêu cầu mã mới.",
+                    )
+
+                otp_id, expected_code, attempts, expires_at, is_used = otp_record
+
+                if attempts >= 5:
+                    raise HTTPException(
+                        status_code=status.HTTP_400_BAD_REQUEST,
+                        detail="Mã OTP đã bị khóa do nhập sai quá 5 lần. Vui lòng bấm gửi lại mã mới.",
+                    )
+
+                now = datetime.now(timezone.utc)
+                if expires_at < now:
+                    raise HTTPException(
+                        status_code=status.HTTP_400_BAD_REQUEST,
+                        detail="Mã OTP đã hết hạn. Vui lòng bấm gửi lại mã mới.",
+                    )
+
+                if expected_code != request.otp_code:
+                    cursor.execute(
+                        """
+                        UPDATE public.email_otps
+                        SET attempts = attempts + 1
+                        WHERE id = %s
+                        """,
+                        (otp_id,),
+                    )
+                    connection.commit()
+                    remaining = 4 - attempts
+                    detail_msg = (
+                        f"Mã OTP không chính xác. Bạn còn {remaining} lần thử."
+                        if remaining > 0
+                        else "Mã OTP không chính xác. Bạn đã hết số lần thử, vui lòng gửi lại mã mới."
+                    )
+                    raise HTTPException(
+                        status_code=status.HTTP_400_BAD_REQUEST,
+                        detail=detail_msg,
+                    )
+
+                # Correct OTP: Mark as used
+                cursor.execute(
+                    """
+                    UPDATE public.email_otps
+                    SET is_used = TRUE
+                    WHERE id = %s
+                    """,
+                    (otp_id,),
+                )
+                connection.commit()
+
+        access_token = create_access_token(session["user_id"])
+        return TokenResponse(access_token=access_token)
+
+    except HTTPException:
+        raise
+    except Exception as error:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Không thể xác thực mã OTP lúc này.",
+        ) from error
+
+
+@router.post("/resend-otp", response_model=ResendOtpResponse)
+def resend_otp(request: ResendOtpRequest) -> ResendOtpResponse:
+    session = verify_otp_session_token(request.otp_session_token)
+    if not session or session["email"].lower() != request.email.lower():
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Phiên xác thực không hợp lệ hoặc đã hết hạn. Vui lòng đăng nhập lại.",
+        )
+
+    try:
+        with get_connection() as connection:
+            with connection.cursor() as cursor:
+                cursor.execute(
+                    """
+                    SELECT created_at
+                    FROM public.email_otps
+                    WHERE email = %s AND purpose = 'GOOGLE_2FA'
+                    ORDER BY created_at DESC
+                    LIMIT 1
+                    """,
+                    (request.email.lower(),),
+                )
+                last_otp = cursor.fetchone()
+                if last_otp:
+                    last_created = last_otp[0]
+                    diff_sec = (datetime.now(timezone.utc) - last_created).total_seconds()
+                    if diff_sec < 60:
+                        wait_time = int(60 - diff_sec)
+                        raise HTTPException(
+                            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+                            detail=f"Vui lòng đợi thêm {wait_time} giây trước khi yêu cầu gửi lại mã OTP.",
+                        )
+
+                cursor.execute(
+                    """
+                    SELECT full_name
+                    FROM public.users
+                    WHERE email = %s
+                    """,
+                    (request.email.lower(),),
+                )
+                user_row = cursor.fetchone()
+                full_name = user_row[0] if user_row else request.email.split("@")[0]
+
+                otp_code = generate_otp_code()
+                cursor.execute(
+                    """
+                    INSERT INTO public.email_otps (
+                        email,
+                        otp_code,
+                        purpose,
+                        expires_at
+                    )
+                    VALUES (%s, %s, 'GOOGLE_2FA', CURRENT_TIMESTAMP + INTERVAL '5 minutes')
+                    """,
+                    (request.email.lower(), otp_code),
+                )
+                connection.commit()
+
+        try:
+            send_otp_email(request.email.lower(), full_name, otp_code)
+        except Exception:
+            pass
+
+        return ResendOtpResponse(
+            message="Mã OTP mới gồm 6 chữ số đã được gửi tới email của bạn.",
+            email=request.email,
+        )
+
+    except HTTPException:
+        raise
+    except Exception as error:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Không thể gửi lại mã OTP lúc này.",
+        ) from error
+
 
 

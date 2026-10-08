@@ -229,6 +229,7 @@ def test_google_login_success() -> None:
 
     assert response.status_code == 200
     data = response.json()
-    assert data["access_token"]
-    assert data["token_type"] == "bearer"
+    assert data["require_otp"] is True
+    assert data["email"] == "hasagi1706@gmail.com"
+    assert "otp_session_token" in data
 
