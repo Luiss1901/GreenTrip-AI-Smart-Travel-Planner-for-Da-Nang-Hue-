@@ -1,11 +1,12 @@
 import { useState, useRef, useEffect, useMemo } from 'react';
 import { Map as MapIcon, List as ListIcon } from 'lucide-react';
 import type { PoiCategory, PoiCity } from '@/data/pois';
-import { pois as allPois } from '@/data/pois';
+import { normalizePois, type PaginatedPoisResponse } from '@/data/pois';
 import FilterBar from '@/components/poi/FilterBar';
 import PoiCard from '@/components/poi/PoiCard';
 import PoiMap from '@/components/poi/PoiMap';
 import { PoiCardSkeleton } from '@/components/ui/Skeleton';
+import { fetchJson } from '@/lib/api';
 
 type CityFilter = 'all' | PoiCity;
 type CategoryFilter = 'all' | PoiCategory;
@@ -18,12 +19,37 @@ export default function ExplorePage() {
   const [hoveredPoiId, setHoveredPoiId] = useState<string | null>(null);
   const [favorites, setFavorites] = useState<Set<string>>(new Set());
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [allPois, setAllPois] = useState(() => [] as Awaited<ReturnType<typeof normalizePois>>);
   const [mobileView, setMobileView] = useState<'map' | 'list'>('map');
 
-  // Simulate loading
   useEffect(() => {
-    const t = setTimeout(() => setLoading(false), 800);
-    return () => clearTimeout(t);
+    let active = true;
+
+    async function loadPois() {
+      try {
+        setLoading(true);
+        setError(null);
+        const response = await fetchJson<PaginatedPoisResponse>('/pois?limit=100&page=1');
+        const normalized = normalizePois(response.items);
+        if (!active) return;
+        setAllPois(normalized);
+      } catch (loadError) {
+        if (!active) return;
+        setError(loadError instanceof Error ? loadError.message : 'Failed to load POIs');
+        setAllPois([]);
+      } finally {
+        if (active) {
+          setLoading(false);
+        }
+      }
+    }
+
+    loadPois();
+
+    return () => {
+      active = false;
+    };
   }, []);
 
   const filteredPois = useMemo(() => {
@@ -34,7 +60,7 @@ export default function ExplorePage() {
           !p.description.toLowerCase().includes(search.toLowerCase())) return false;
       return true;
     });
-  }, [search, cityFilter, categoryFilter]);
+  }, [allPois, search, cityFilter, categoryFilter]);
 
   const toggleFavorite = (id: string) => {
     setFavorites((prev) => {
@@ -85,6 +111,8 @@ export default function ExplorePage() {
             <div className="space-y-3 mt-3">
               {loading ? (
                 Array.from({ length: 6 }).map((_, i) => <PoiCardSkeleton key={i} />)
+              ) : error ? (
+                <ErrorState message={error} />
               ) : filteredPois.length === 0 ? (
                 <EmptyState />
               ) : (
@@ -146,6 +174,18 @@ function EmptyState() {
       </div>
       <p className="text-sm font-medium text-charcoal">Không tìm thấy địa điểm phù hợp</p>
       <p className="mt-1 text-xs text-muted">Thử bỏ bớt bộ lọc nhé</p>
+    </div>
+  );
+}
+
+function ErrorState({ message }: { message: string }) {
+  return (
+    <div className="flex flex-col items-center justify-center rounded-2xl border border-red-200 bg-red-50 py-12 text-center animate-fadeIn">
+      <div className="mb-3 flex h-12 w-12 items-center justify-center rounded-full bg-red-100">
+        <MapIcon size={24} className="text-red-600" />
+      </div>
+      <p className="text-sm font-medium text-red-700">Không thể tải địa điểm</p>
+      <p className="mt-1 text-xs text-red-600">{message}</p>
     </div>
   );
 }
